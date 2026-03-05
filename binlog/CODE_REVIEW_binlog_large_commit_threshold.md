@@ -25,9 +25,9 @@
 ## Patch 说明
 
 - **文件**：`mysql-server-binlog-large-commit-threshold.patch`
-- **基于**：mysql-server 仓库当前工作区（含 modified + 新增测试及 result）
-- **应用**：在 mysql-server 根目录执行 `git apply mysql-server-binlog-large-commit-threshold.patch`（若仅需 binlog 相关变更，可先筛选出对应文件的 diff 再 apply）。
-
-## 备注
-
-- Patch 中同时包含 CMakeLists.txt、disabled.def 等与本地环境相关的修改，若仅需提交 binlog 特性，可从 patch 中剔除无关 hunks 后再应用或提交。
+- **包含**：仅以下 9 个文件
+  - sql/binlog.cc, sql/binlog.h, sql/binlog_ostream.cc, sql/binlog_ostream.h
+  - sql/mysqld.cc, sql/mysqld.h, sql/sys_vars.cc
+  - mysql-test/suite/binlog_nogtid/t/binlog_large_commit_threshold.test
+  - mysql-test/suite/binlog_nogtid/r/binlog_large_commit_threshold.result
+- **应用**：在 mysql-server 根目录执行 `git apply mysql-server-binlog-large-commit-threshold.patch`。依赖 include/my_sys.h、mysys/mf_iocache.cc 的修改需单独合入后再应用本 patch。
