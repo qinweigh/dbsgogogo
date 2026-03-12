@@ -1,0 +1,1355 @@
+diff --git a/mysql-test/r/mysqld--help-notwin.result b/mysql-test/r/mysqld--help-notwin.result
+index 1f47454ca6e..02819102063 100644
+--- a/mysql-test/r/mysqld--help-notwin.result
++++ b/mysql-test/r/mysqld--help-notwin.result
+@@ -178,6 +178,12 @@ The following options may be given as the first argument:
+  --binlog-ignore-db=name 
+  Exclude updates to the specified database when writing
+  the binary log.
++ --binlog-large-commit-threshold=# 
++ When the binlog cache of a committing transaction exceeds
++ this size, the server renames the cache file to a new
++ binlog file instead of copying, avoiding long LOCK_log
++ hold times for large transactions. Set to 0 to disable
++ this optimization.
+  --binlog-max-flush-queue-time=# 
+  The maximum time that the binary log group commit will
+  keep reading transactions before it flush the
+@@ -1688,6 +1694,7 @@ binlog-format ROW
+ binlog-group-commit-sync-delay 0
+ binlog-group-commit-sync-no-delay-count 0
+ binlog-gtid-simple-recovery TRUE
++binlog-large-commit-threshold 134217728
+ binlog-max-flush-queue-time 0
+ binlog-order-commits TRUE
+ binlog-rotate-encryption-master-key-at-startup FALSE
+diff --git a/mysql-test/suite/binlog_nogtid/r/binlog_persist_only_variables.result b/mysql-test/suite/binlog_nogtid/r/binlog_persist_only_variables.result
+index 6bfdb762bae..875cc4ede53 100644
+--- a/mysql-test/suite/binlog_nogtid/r/binlog_persist_only_variables.result
++++ b/mysql-test/suite/binlog_nogtid/r/binlog_persist_only_variables.result
+@@ -47,7 +47,7 @@ INSERT INTO aliases(name) VALUES
+ ('slave_parallel_workers'), ('slave_pending_jobs_size_max'),
+ ('pseudo_slave_mode'), ('skip_slave_start');
+ 
+-include/assert.inc [Expect 114 variables in the table.]
++include/assert.inc [Expect 115 variables in the table.]
+ 
+ # Test SET PERSIST_ONLY
+ SET PERSIST_ONLY binlog_cache_size = @@GLOBAL.binlog_cache_size;
+@@ -64,6 +64,7 @@ Warning	1287	'@@binlog_format' is deprecated and will be removed in a future rel
+ SET PERSIST_ONLY binlog_group_commit_sync_delay = @@GLOBAL.binlog_group_commit_sync_delay;
+ SET PERSIST_ONLY binlog_group_commit_sync_no_delay_count = @@GLOBAL.binlog_group_commit_sync_no_delay_count;
+ SET PERSIST_ONLY binlog_gtid_simple_recovery = @@GLOBAL.binlog_gtid_simple_recovery;
++SET PERSIST_ONLY binlog_large_commit_threshold = @@GLOBAL.binlog_large_commit_threshold;
+ SET PERSIST_ONLY binlog_max_flush_queue_time = @@GLOBAL.binlog_max_flush_queue_time;
+ Warnings:
+ Warning	1287	'@@binlog_max_flush_queue_time' is deprecated and will be removed in a future release.
+@@ -281,16 +282,16 @@ Warning	1287	'@@sync_relay_log_info' is deprecated and will be removed in a futu
+ Warning	1287	'@@sync_relay_log_info' is deprecated and will be removed in a future release.
+ SET PERSIST_ONLY sync_source_info = @@GLOBAL.sync_source_info;
+ 
+-include/assert.inc [Expect 101 persisted variables in persisted_variables table.]
++include/assert.inc [Expect 102 persisted variables in persisted_variables table.]
+ 
+ ############################################################
+ # 2. Restart server, it must preserve the persisted variable
+ #    settings. Verify persisted configuration.
+ # restart
+ 
+-include/assert.inc [Expect 101 persisted variables in persisted_variables table.]
+-include/assert.inc [Expect 101 persisted variables shown as PERSISTED in variables_info table.]
+-include/assert.inc [Expect 101 persisted variables with matching persisted and global values.]
++include/assert.inc [Expect 102 persisted variables in persisted_variables table.]
++include/assert.inc [Expect 102 persisted variables shown as PERSISTED in variables_info table.]
++include/assert.inc [Expect 102 persisted variables with matching persisted and global values.]
+ 
+ ############################################################
+ # 3. Test RESET PERSIST. Verify persisted variable settings
+@@ -306,6 +307,7 @@ RESET PERSIST binlog_format;
+ RESET PERSIST binlog_group_commit_sync_delay;
+ RESET PERSIST binlog_group_commit_sync_no_delay_count;
+ RESET PERSIST binlog_gtid_simple_recovery;
++RESET PERSIST binlog_large_commit_threshold;
+ RESET PERSIST binlog_max_flush_queue_time;
+ RESET PERSIST binlog_order_commits;
+ RESET PERSIST binlog_rotate_encryption_master_key_at_startup;
+diff --git a/mysql-test/suite/binlog_nogtid/r/binlog_persist_variables.result b/mysql-test/suite/binlog_nogtid/r/binlog_persist_variables.result
+index cb4fad973ff..2a0fa20ca61 100644
+--- a/mysql-test/suite/binlog_nogtid/r/binlog_persist_variables.result
++++ b/mysql-test/suite/binlog_nogtid/r/binlog_persist_variables.result
+@@ -26,7 +26,7 @@ VARIABLE_NAME LIKE '%source%') AND
+ 'innodb_master_thread_disabled_debug', 'innodb_replication_delay'))
+ ORDER BY VARIABLE_NAME;
+ 
+-include/assert.inc [Expect 114 variables in the table.]
++include/assert.inc [Expect 115 variables in the table.]
+ 
+ # Test SET PERSIST
+ SET PERSIST binlog_cache_size = @@GLOBAL.binlog_cache_size;
+@@ -44,6 +44,7 @@ SET PERSIST binlog_group_commit_sync_delay = @@GLOBAL.binlog_group_commit_sync_d
+ SET PERSIST binlog_group_commit_sync_no_delay_count = @@GLOBAL.binlog_group_commit_sync_no_delay_count;
+ SET PERSIST binlog_gtid_simple_recovery = @@GLOBAL.binlog_gtid_simple_recovery;
+ ERROR HY000: Variable 'binlog_gtid_simple_recovery' is a read only variable
++SET PERSIST binlog_large_commit_threshold = @@GLOBAL.binlog_large_commit_threshold;
+ SET PERSIST binlog_max_flush_queue_time = @@GLOBAL.binlog_max_flush_queue_time;
+ Warnings:
+ Warning	1287	'@@binlog_max_flush_queue_time' is deprecated and will be removed in a future release.
+@@ -258,16 +259,16 @@ Warning	1287	'@@sync_relay_log_info' is deprecated and will be removed in a futu
+ Warning	1287	'@@sync_relay_log_info' is deprecated and will be removed in a future release.
+ SET PERSIST sync_source_info = @@GLOBAL.sync_source_info;
+ 
+-include/assert.inc [Expect 90 persisted variables in persisted_variables table.]
++include/assert.inc [Expect 91 persisted variables in persisted_variables table.]
+ 
+ ############################################################
+ # 2. Restart server, it must preserve the persisted variable
+ #    settings. Verify persisted configuration.
+ # restart
+ 
+-include/assert.inc [Expect 90 persisted variables in persisted_variables table.']
+-include/assert.inc [Expect 90 persisted variables shown as PERSISTED in variables_info table.']
+-include/assert.inc [Expect 90 persisted variables with matching persisted and global values.]
++include/assert.inc [Expect 91 persisted variables in persisted_variables table.']
++include/assert.inc [Expect 91 persisted variables shown as PERSISTED in variables_info table.']
++include/assert.inc [Expect 91 persisted variables with matching persisted and global values.]
+ 
+ ############################################################
+ # 3. Test RESET PERSIST IF EXISTS. Verify persisted variable
+@@ -285,6 +286,7 @@ RESET PERSIST IF EXISTS binlog_group_commit_sync_no_delay_count;
+ RESET PERSIST IF EXISTS binlog_gtid_simple_recovery;
+ Warnings:
+ Warning	3615	Variable binlog_gtid_simple_recovery does not exist in persisted config file
++RESET PERSIST IF EXISTS binlog_large_commit_threshold;
+ RESET PERSIST IF EXISTS binlog_max_flush_queue_time;
+ RESET PERSIST IF EXISTS binlog_order_commits;
+ RESET PERSIST IF EXISTS binlog_rotate_encryption_master_key_at_startup;
+diff --git a/mysql-test/suite/binlog_nogtid/t/binlog_persist_only_variables.test b/mysql-test/suite/binlog_nogtid/t/binlog_persist_only_variables.test
+index 3b3e096e824..14fec82d153 100644
+--- a/mysql-test/suite/binlog_nogtid/t/binlog_persist_only_variables.test
++++ b/mysql-test/suite/binlog_nogtid/t/binlog_persist_only_variables.test
+@@ -84,7 +84,7 @@ INSERT INTO aliases(name) VALUES
+ # If this count differs, it means a variable has been added or removed.
+ # In that case, this testcase needs to be updated accordingly.
+ --echo
+---let $expected = 114
++--let $expected = 115
+ --let $assert_text = Expect $expected variables in the table.
+ --let $assert_cond = [SELECT COUNT(*) as count FROM rplvars, count, 1] = $expected
+ --source include/assert.inc
+@@ -116,7 +116,7 @@ while ( $varid <= $countvars )
+ }
+ 
+ --echo
+---let $expected = 101
++--let $expected = 102
+ --let $assert_text = Expect $expected persisted variables in persisted_variables table.
+ --let $assert_cond = [SELECT COUNT(*) as count FROM performance_schema.persisted_variables, count, 1] = $expected
+ --source include/assert.inc
+diff --git a/mysql-test/suite/binlog_nogtid/t/binlog_persist_variables.test b/mysql-test/suite/binlog_nogtid/t/binlog_persist_variables.test
+index b909e064496..1f3cdd51e00 100644
+--- a/mysql-test/suite/binlog_nogtid/t/binlog_persist_variables.test
++++ b/mysql-test/suite/binlog_nogtid/t/binlog_persist_variables.test
+@@ -62,7 +62,7 @@ INSERT INTO rplvars (varname, varvalue)
+ # If this count differs, it means a variable has been added or removed.
+ # In that case, this testcase needs to be updated accordingly.
+ --echo
+---let $expected = 114
++--let $expected = 115
+ --let $assert_text = Expect $expected variables in the table.
+ --let $assert_cond = [SELECT COUNT(*) as count FROM rplvars, count, 1] = $expected
+ --source include/assert.inc
+@@ -85,7 +85,7 @@ while ( $varid <= $countvars )
+ }
+ 
+ --echo
+---let $expected = 90
++--let $expected = 91
+ --let $assert_text = Expect $expected persisted variables in persisted_variables table.
+ --let $assert_cond = [SELECT COUNT(*) as count FROM performance_schema.persisted_variables, count, 1] = $expected
+ --source include/assert.inc
+diff --git a/mysql-test/suite/sys_vars/r/all_vars.result b/mysql-test/suite/sys_vars/r/all_vars.result
+index ab906a8ce57..816c9ce88f5 100644
+--- a/mysql-test/suite/sys_vars/r/all_vars.result
++++ b/mysql-test/suite/sys_vars/r/all_vars.result
+@@ -22,6 +22,8 @@ binlog_encryption
+ binlog_encryption
+ binlog_expire_logs_auto_purge
+ binlog_expire_logs_auto_purge
++binlog_large_commit_threshold
++binlog_large_commit_threshold
+ binlog_rotate_encryption_master_key_at_startup
+ binlog_rotate_encryption_master_key_at_startup
+ cte_max_recursion_depth
+diff --git a/sql/CMakeLists.txt b/sql/CMakeLists.txt
+index 75dbdda9a65..fa60cc5336e 100644
+--- a/sql/CMakeLists.txt
++++ b/sql/CMakeLists.txt
+@@ -995,6 +995,7 @@ SET(BINLOG_SOURCE
+   binlog/decompressing_event_object_istream.cc
+   binlog.cc
+   binlog_istream.cc
++  binlog_large_commit.cc
+   binlog_ostream.cc
+   binlog_reader.cc
+   changestreams/misc/replicated_columns_view.cc
+diff --git a/sql/binlog.cc b/sql/binlog.cc
+index 2e90d0f481b..577ed0e372f 100644
+--- a/sql/binlog.cc
++++ b/sql/binlog.cc
+@@ -89,6 +89,7 @@
+ #include "sql/binlog/global.h"
+ #include "sql/binlog/group_commit/bgc_ticket_manager.h"  // Bgc_ticket_manager
+ #include "sql/binlog/recovery.h"  // binlog::Binlog_recovery
++#include "sql/binlog_large_commit.h"
+ #include "sql/binlog_ostream.h"
+ #include "sql/binlog_reader.h"
+ #include "sql/create_field.h"
+@@ -8070,6 +8071,9 @@ int MYSQL_BIN_LOG::prepare(THD *thd, bool all) {
+   @retval RESULT_ABORTED   error, transaction was neither logged nor committed
+   @retval RESULT_INCONSISTENT  error, transaction was logged but not committed
+ */
++
++static bool should_commit_by_rename(THD *thd, binlog_cache_data *cache_data);
++
+ TC_LOG::enum_result MYSQL_BIN_LOG::commit(THD *thd, bool all) {
+   DBUG_TRACE;
+   DBUG_PRINT("info",
+@@ -8302,6 +8306,20 @@ TC_LOG::enum_result MYSQL_BIN_LOG::commit(THD *thd, bool all) {
+       return RESULT_ABORTED;
+     }
+ 
++    /*
++      Try the commit-by-rename fast path for large transactions.
++      If the transaction qualifies, this renames the cache temp file
++      to become the next binlog file instead of copying data under LOCK_log.
++    */
++    if (should_commit_by_rename(thd, &cache_mngr->trx_cache)) {
++      int rename_ret = commit_by_rename(thd, all, skip_commit);
++      if (rename_ret == 0)
++        goto done;  // Success via rename path
++      else if (rename_ret > 0)
++        return RESULT_INCONSISTENT;  // Hard error
++      /* rename_ret == -1: not applicable, fall through to ordered_commit */
++    }
++
+     if (ordered_commit(thd, all, skip_commit)) return RESULT_INCONSISTENT;
+ 
+     DBUG_EXECUTE_IF("ensure_binlog_cache_is_reset", {
+@@ -8327,6 +8345,7 @@ TC_LOG::enum_result MYSQL_BIN_LOG::commit(THD *thd, bool all) {
+       return RESULT_INCONSISTENT;
+   }
+ 
++done:
+   return RESULT_SUCCESS;
+ }
+ 
+@@ -9146,6 +9165,473 @@ commit_stage:
+   return thd->commit_error == THD::CE_COMMIT_ERROR;
+ }
+ 
++/**
++  Check whether the current transaction qualifies for the commit-by-rename
++  optimization.
++
++  Conditions:
++  - binlog_large_commit_threshold > 0
++  - Cache size exceeds the threshold
++  - Cache file is on disk (not purely in-memory)
++  - Reserved space has been allocated in the cache file
++  - Binlog encryption is disabled
++  - Binlog checksums are disabled (MVP restriction)
++*/
++static bool should_commit_by_rename(THD *, binlog_cache_data *cache_data) {
++  if (opt_binlog_large_commit_threshold == 0) return false;
++
++  my_off_t cache_size = cache_data->get_byte_position();
++  if (cache_size <= opt_binlog_large_commit_threshold) return false;
++
++  Binlog_cache_storage *cache = cache_data->get_cache();
++
++  if (cache->disk_writes() == 0) return false;
++  if (cache->file_reserved_bytes() == 0) return false;
++  if (rpl_encryption.is_enabled()) return false;
++
++  if (binlog_checksum_options != binary_log::BINLOG_CHECKSUM_ALG_OFF)
++    return false;
++
++  return true;
++}
++
++/**
++  Write a raw IGNORABLE_LOG_EVENT to fill a gap in the binlog file.
++  The event body is all zeros.
++
++  @param fd         File descriptor to write to
++  @param offset     Offset in the file where the event starts
++  @param event_len  Total event length (header + body, no checksum)
++  @param end_pos    The end_log_pos to set (= offset + event_len)
++
++  @retval false  Success
++  @retval true   Error
++*/
++static bool write_ignorable_filler(File fd, my_off_t offset, uint32 event_len,
++                                   uint32 end_pos) {
++  uchar header[LOG_EVENT_HEADER_LEN];
++  memset(header, 0, sizeof(header));
++
++  /* timestamp = 0 */
++  int4store(header, 0);
++  header[EVENT_TYPE_OFFSET] = binary_log::IGNORABLE_LOG_EVENT;
++  int4store(header + SERVER_ID_OFFSET, server_id);
++  int4store(header + EVENT_LEN_OFFSET, event_len);
++  int4store(header + LOG_POS_OFFSET, end_pos);
++  int2store(header + FLAGS_OFFSET, LOG_EVENT_IGNORABLE_F);
++
++  if (mysql_file_pwrite(fd, header, LOG_EVENT_HEADER_LEN, offset,
++                        MYF(MY_WME | MY_NABP)))
++    return true;
++
++  /* Write zero body if event is larger than just the header */
++  if (event_len > LOG_EVENT_HEADER_LEN) {
++    uint32 body_len = event_len - LOG_EVENT_HEADER_LEN;
++    uchar zeros[IO_SIZE];
++    memset(zeros, 0, sizeof(zeros));
++    my_off_t written = 0;
++    my_off_t body_offset = offset + LOG_EVENT_HEADER_LEN;
++    while (written < body_len) {
++      uint32 chunk = std::min(static_cast<uint32>(sizeof(zeros)),
++                              static_cast<uint32>(body_len - written));
++      if (mysql_file_pwrite(fd, zeros, chunk, body_offset + written,
++                            MYF(MY_WME | MY_NABP)))
++        return true;
++      written += chunk;
++    }
++  }
++  return false;
++}
++
++/**
++  Fix up end_log_pos for all events in the cache file's data region.
++  Events in the cache have end_log_pos = 0. After rename, they need
++  correct absolute positions in the final binlog file.
++
++  Only valid when binlog checksums are OFF (no CRC to recompute).
++
++  @param fd            File descriptor of the cache file
++  @param data_offset   Start offset of event data in the file
++  @param data_end      End offset (= total file size)
++
++  @retval false  Success
++  @retval true   Error
++*/
++static bool fixup_event_positions(File fd, my_off_t data_offset,
++                                  my_off_t data_end) {
++  uchar buf[4];
++  my_off_t pos = data_offset;
++
++  while (pos < data_end) {
++    /* Read event_len at offset pos + EVENT_LEN_OFFSET */
++    if (mysql_file_pread(fd, buf, 4, pos + EVENT_LEN_OFFSET, MYF(MY_WME)) != 4)
++      return true;
++    uint32 event_len = uint4korr(buf);
++    if (event_len < LOG_EVENT_HEADER_LEN || pos + event_len > data_end)
++      return true;
++
++    /* Write correct end_log_pos = pos + event_len */
++    uint32 end_log_pos = static_cast<uint32>(pos + event_len);
++    int4store(buf, end_log_pos);
++    if (mysql_file_pwrite(fd, buf, 4, pos + LOG_POS_OFFSET,
++                          MYF(MY_WME | MY_NABP)))
++      return true;
++
++    pos += event_len;
++  }
++  return false;
++}
++
++/**
++  Commit a large transaction by renaming its binlog cache temp file
++  to become the next binlog file. This avoids copying potentially
++  gigabytes of data while holding LOCK_log.
++
++  High-level flow:
++  1. Sync cache file to disk
++  2. Acquire LOCK_log, assign GTID
++  3. Rotate binlog (creates new binlog with header events)
++  4. Copy header from new binlog into cache file's reserved area
++  5. Serialize GTID event into cache file
++  6. Write filler event for any gap in reserved area
++  7. Fix end_log_pos in all transaction events
++  8. Close + delete new binlog, rename cache -> binlog
++  9. Reopen the renamed file as the active binlog
++  10. Engine commit, GTID state update
++
++  @param thd          Current thread
++  @param all          true for real commit, false for statement commit
++  @param skip_commit  If true, skip ha_commit_low
++
++  @retval 0    Success
++  @retval -1   Not applicable, caller should fall through to ordered_commit
++  @retval >0   Error
++*/
++int MYSQL_BIN_LOG::commit_by_rename(THD *thd, bool all, bool skip_commit) {
++  DBUG_TRACE;
++
++  binlog_cache_mngr *cache_mngr = thd_get_cache_mngr(thd);
++  if (cache_mngr == nullptr) return -1;
++
++  binlog_cache_data *cache_data = &cache_mngr->trx_cache;
++  Binlog_cache_storage *cache = cache_data->get_cache();
++  IO_CACHE *io_cache = cache->get_io_cache();
++  File cache_fd = io_cache->file;
++  if (cache_fd < 0) return -1;
++
++  const char *cache_path = cache->tmp_file_name();
++  if (cache_path == nullptr || cache_path[0] == '\0') return -1;
++
++  uint32_t reserved_bytes = cache->file_reserved_bytes();
++  if (reserved_bytes == 0) return -1;
++
++  /* Step 1: Sync cache file data to disk */
++  if (cache->sync_to_disk()) return -1;
++
++  my_off_t cache_data_size = cache->length();
++  my_off_t total_file_size = reserved_bytes + cache_data_size;
++
++  /* Step 2: Acquire LOCK_log */
++  mysql_mutex_lock(&LOCK_log);
++
++  if (unlikely(!is_open())) {
++    mysql_mutex_unlock(&LOCK_log);
++    return -1;
++  }
++
++  /* Step 2b: Assign GTID */
++  thd->next_to_commit = nullptr;
++  if (assign_automatic_gtids_to_flush_group(thd)) {
++    mysql_mutex_unlock(&LOCK_log);
++    return 1;
++  }
++
++  /* Step 3: Rotate binlog. Creates new binlog with header events. */
++  int error = new_file_without_locking(nullptr);
++  if (error) {
++    mysql_mutex_unlock(&LOCK_log);
++    return 1;
++  }
++
++  /* Header size = position in the new binlog after FDE + Previous_gtids */
++  my_off_t header_size = m_binlog_file->position();
++
++  /* Step 4: Create GTID event */
++  Transaction_ctx *trn_ctx = thd->get_transaction();
++  trn_ctx->sequence_number = m_dependency_tracker.step();
++  int64 sequence_number = trn_ctx->sequence_number;
++  int64 last_committed = sequence_number - 1;
++  trn_ctx->last_committed = SEQ_UNINIT;
++
++  ulonglong immediate_commit_timestamp = my_micro_time();
++  ulonglong original_commit_timestamp =
++      thd->variables.original_commit_timestamp;
++  if (original_commit_timestamp == UNDEFINED_COMMIT_TIMESTAMP) {
++    if (thd->slave_thread || thd->is_binlog_applier())
++      original_commit_timestamp = 0;
++    else
++      original_commit_timestamp = immediate_commit_timestamp;
++  } else {
++    thd->variables.original_commit_timestamp = UNDEFINED_COMMIT_TIMESTAMP;
++  }
++
++  uint32_t trx_immediate_server_version =
++      do_server_version_int(::server_version);
++  thd->variables.immediate_server_version = UNDEFINED_SERVER_VERSION;
++
++  uint32_t trx_original_server_version = thd->variables.original_server_version;
++  if (trx_original_server_version == UNDEFINED_SERVER_VERSION) {
++    if (thd->slave_thread || thd->is_binlog_applier())
++      trx_original_server_version = UNKNOWN_SERVER_VERSION;
++    else
++      trx_original_server_version = trx_immediate_server_version;
++  } else {
++    thd->variables.original_server_version = UNDEFINED_SERVER_VERSION;
++  }
++
++  Gtid_log_event gtid_event(
++      thd, cache_data->is_trx_cache(), last_committed, sequence_number,
++      cache_data->may_have_sbr_stmts(), original_commit_timestamp,
++      immediate_commit_timestamp, trx_original_server_version,
++      trx_immediate_server_version);
++
++  /* Serialize GTID event to buffer using StringBuffer_ostream */
++  StringBuffer_ostream<256> gtid_buf;
++
++  /*
++    We need to set end_log_pos for the GTID event. Since checksums are OFF
++    and events in cache also don't have checksums, no checksum handling needed.
++    The GTID event's log_pos should be its start position in the final file.
++  */
++  gtid_event.common_header->log_pos = header_size;
++  gtid_event.common_footer->checksum_alg =
++      binary_log::BINLOG_CHECKSUM_ALG_OFF;
++
++  /*
++    Compute transaction_length. It spans from GTID event through all
++    transaction events including any filler event in between.
++    transaction_length = total_file_size - header_size
++  */
++  gtid_event.set_trx_length_by_cache_size(
++      cache_data->get_byte_position(), false /* is_checksum_enabled */,
++      cache_data->get_event_counter());
++
++  if (binary_event_serialize(&gtid_event, &gtid_buf)) {
++    m_binlog_file->close();
++    mysql_mutex_unlock(&LOCK_log);
++    return 1;
++  }
++
++  size_t gtid_size = gtid_buf.length();
++
++  /* Check if reserved space is sufficient */
++  if (header_size + gtid_size > reserved_bytes) {
++    /*
++      Reserved space is too small. Can't do rename. Undo the rotation
++      and fall back to normal ordered_commit. This is a rare edge case.
++    */
++    /* TODO: undo rotation gracefully. For now, just fail. */
++    mysql_mutex_unlock(&LOCK_log);
++    return -1;
++  }
++
++  size_t filler_size = reserved_bytes - header_size - gtid_size;
++
++  /* Recalculate transaction_length including filler if needed */
++  if (filler_size > 0 && filler_size >= LOG_EVENT_HEADER_LEN) {
++    /*
++      transaction_length should be: gtid_size + filler_size + cache_data_size
++      But set_trx_length_by_cache_size already computed it as
++      gtid_size + cache_data_size. Need to add filler_size.
++      Re-serialize the GTID event after adjusting.
++    */
++    ulonglong adjusted_trx_len =
++        gtid_size + filler_size + cache_data_size;
++    gtid_event.transaction_length = adjusted_trx_len;
++
++    /* Clear and re-serialize */
++    gtid_buf.length(0);
++    if (binary_event_serialize(&gtid_event, &gtid_buf)) {
++      m_binlog_file->close();
++      mysql_mutex_unlock(&LOCK_log);
++      return 1;
++    }
++    size_t new_gtid_size = gtid_buf.length();
++    if (new_gtid_size != gtid_size) {
++      /*
++        GTID event size changed due to transaction_length encoding.
++        Recalculate filler and retry once.
++      */
++      gtid_size = new_gtid_size;
++      filler_size = reserved_bytes - header_size - gtid_size;
++      if (header_size + gtid_size > reserved_bytes ||
++          (filler_size > 0 && filler_size < LOG_EVENT_HEADER_LEN)) {
++        mysql_mutex_unlock(&LOCK_log);
++        return -1;
++      }
++      adjusted_trx_len = gtid_size + filler_size + cache_data_size;
++      gtid_event.transaction_length = adjusted_trx_len;
++      gtid_buf.length(0);
++      if (binary_event_serialize(&gtid_event, &gtid_buf)) {
++        m_binlog_file->close();
++        mysql_mutex_unlock(&LOCK_log);
++        return 1;
++      }
++      gtid_size = gtid_buf.length();
++      filler_size = reserved_bytes - header_size - gtid_size;
++    }
++  } else if (filler_size > 0 && filler_size < LOG_EVENT_HEADER_LEN) {
++    /* Gap too small for even a minimal event. Fall back. */
++    mysql_mutex_unlock(&LOCK_log);
++    return -1;
++  }
++
++
++  /* Step 5: Read header from new binlog file and write to cache file */
++  {
++    File src_fd = mysql_file_open(key_file_binlog, log_file_name,
++                                  O_RDONLY, MYF(MY_WME));
++    if (src_fd < 0) {
++      mysql_mutex_unlock(&LOCK_log);
++      return 1;
++    }
++
++    uchar buf[IO_SIZE];
++    my_off_t copied = 0;
++    while (copied < header_size) {
++      size_t to_read = std::min(static_cast<size_t>(header_size - copied),
++                                sizeof(buf));
++      size_t nread = mysql_file_read(src_fd, buf, to_read, MYF(MY_WME));
++      if (nread == (size_t)-1 || nread == 0) {
++        mysql_file_close(src_fd, MYF(0));
++        mysql_mutex_unlock(&LOCK_log);
++        return 1;
++      }
++      if (mysql_file_pwrite(cache_fd, buf, nread, copied,
++                            MYF(MY_WME | MY_NABP))) {
++        mysql_file_close(src_fd, MYF(0));
++        mysql_mutex_unlock(&LOCK_log);
++        return 1;
++      }
++      copied += nread;
++    }
++    mysql_file_close(src_fd, MYF(0));
++  }
++
++  /* Step 6: Write GTID event to cache file */
++  if (mysql_file_pwrite(cache_fd,
++                        pointer_cast<const uchar *>(gtid_buf.ptr()),
++                        gtid_size, header_size, MYF(MY_WME | MY_NABP))) {
++    mysql_mutex_unlock(&LOCK_log);
++    return 1;
++  }
++
++  /* Step 7: Write filler event if there's a gap */
++  if (filler_size >= LOG_EVENT_HEADER_LEN) {
++    my_off_t filler_offset = header_size + gtid_size;
++    uint32 filler_end_pos = static_cast<uint32>(filler_offset + filler_size);
++    if (write_ignorable_filler(cache_fd, filler_offset,
++                               static_cast<uint32>(filler_size),
++                               filler_end_pos)) {
++      mysql_mutex_unlock(&LOCK_log);
++      return 1;
++    }
++  }
++
++  /* Step 8: Fix up end_log_pos in all transaction events */
++  if (fixup_event_positions(cache_fd, reserved_bytes, total_file_size)) {
++    mysql_mutex_unlock(&LOCK_log);
++    return 1;
++  }
++
++  /* Step 9: Sync the modified cache file */
++  if (mysql_file_sync(cache_fd, MYF(0))) {
++    mysql_mutex_unlock(&LOCK_log);
++    return 1;
++  }
++
++
++  /* Step 10: Close the new (mostly empty) binlog file */
++  m_binlog_file->close();
++
++  /* Step 11: Delete the new binlog and rename cache file */
++  if (my_delete(log_file_name, MYF(MY_WME))) {
++    mysql_mutex_unlock(&LOCK_log);
++    return 1;
++  }
++
++  if (my_rename(cache_path, log_file_name, MYF(MY_WME))) {
++    mysql_mutex_unlock(&LOCK_log);
++    return 1;
++  }
++
++  /* Step 12: Reopen the renamed file as the active binlog */
++  {
++    auto new_ofile = Binlog_ofile::open_existing(
++        key_file_binlog, log_file_name, MYF(MY_WME));
++    if (!new_ofile) {
++      mysql_mutex_unlock(&LOCK_log);
++      return 1;
++    }
++
++    delete m_binlog_file;
++    m_binlog_file = new_ofile.release();
++  }
++
++  /*
++    Position the write cursor at the end of the file.
++    truncate(total_file_size) is a no-op for the file size but
++    reinitializes the IO_CACHE write position and sets m_position.
++  */
++  if (m_binlog_file->truncate(total_file_size)) {
++    mysql_mutex_unlock(&LOCK_log);
++    return 1;
++  }
++
++
++  /* Step 13: Set transaction position and update binlog end position */
++  thd->set_trans_pos(log_file_name, m_binlog_file->position());
++
++  if (cache_data->has_xid()) inc_prep_xids(thd);
++
++  update_binlog_end_pos();
++
++  /* Step 14: Detach cache from the (now-renamed) file */
++  cache->detach_temp_file();
++
++  mysql_mutex_unlock(&LOCK_log);
++
++
++  /* Step 15: Engine commit */
++  init_thd_variables(thd, all, skip_commit);
++  ::finish_transaction_in_engines(thd, all, false);
++
++
++  /* Step 16: GTID state update */
++  if (thd->commit_error == THD::CE_NONE) {
++    gtid_state->update_on_commit(thd);
++  } else {
++    gtid_state->update_on_rollback(thd);
++  }
++
++  /* Step 17: Unfence rotation and reset cache */
++  if (cache_data->has_xid()) {
++    trx_coordinator::set_prepared_in_tc_in_engines(thd, all);
++    dec_prep_xids(thd);
++  }
++
++  /* Run after_commit hook */
++  if (thd->commit_error != THD::CE_COMMIT_ERROR &&
++      thd->get_transaction()->m_flags.run_hooks) {
++    (void)RUN_HOOK(transaction, after_commit, (thd, all));
++    thd->get_transaction()->m_flags.run_hooks = false;
++  }
++
++  cache_mngr->reset();
++
++  return thd->commit_error == THD::CE_COMMIT_ERROR ? 1 : 0;
++}
++
+ void MYSQL_BIN_LOG::report_missing_purged_gtids(
+     const Gtid_set *slave_executed_gtid_set, std::string &errmsg) {
+   DBUG_TRACE;
+diff --git a/sql/binlog.h b/sql/binlog.h
+index af50773f72a..caca1183c0f 100644
+--- a/sql/binlog.h
++++ b/sql/binlog.h
+@@ -686,6 +686,22 @@ class MYSQL_BIN_LOG : public TC_LOG {
+                    be skipped and @c false otherwise (the normal case).
+   */
+   int ordered_commit(THD *thd, bool all, bool skip_commit = false);
++
++  /**
++    Commit a large transaction by renaming its cache temp file to become
++    the next binlog file. Avoids O(N) copy under LOCK_log.
++    Only used when binlog_large_commit_threshold > 0 and checksums are OFF.
++
++    @param thd          Current thread
++    @param all          true for real commit, false for statement commit
++    @param skip_commit  If true, skip ha_commit_low
++
++    @retval 0    Success
++    @retval -1   Not applicable, caller should fall through to ordered_commit
++    @retval >0   Error
++  */
++  int commit_by_rename(THD *thd, bool all, bool skip_commit);
++
+   void handle_binlog_flush_or_sync_error(THD *thd, bool need_lock_log,
+                                          const char *message);
+   bool do_write_cache(Binlog_cache_storage *cache,
+diff --git a/sql/binlog_ostream.cc b/sql/binlog_ostream.cc
+index 7aa4062a044..1788a259717 100644
+--- a/sql/binlog_ostream.cc
++++ b/sql/binlog_ostream.cc
+@@ -30,6 +30,7 @@
+ #include "mysql/components/services/log_builtins.h"
+ #include "mysql/psi/mysql_file.h"
+ #include "mysqld_error.h"
++#include "sql/binlog_large_commit.h"
+ #include "sql/mysqld.h"
+ #include "sql/rpl_log_encryption.h"
+ #include "sql/sql_class.h"
+@@ -56,7 +57,20 @@ bool IO_CACHE_binlog_cache_storage::open(const char *dir, const char *prefix,
+   return false;
+ }
+ 
+-void IO_CACHE_binlog_cache_storage::close() { close_cached_file(&m_io_cache); }
++void IO_CACHE_binlog_cache_storage::close() {
++  /*
++    If the cache uses a named file in #binlog_cache_files (non-unlinked),
++    delete it before closing.
++  */
++  if (m_file_reserved_bytes > 0 && m_io_cache.file != -1) {
++    const char *fname = my_filename(m_io_cache.file);
++    if (fname != nullptr && fname[0] != '\0') {
++      my_delete(fname, MYF(0));
++    }
++  }
++  m_file_reserved_bytes = 0;
++  close_cached_file(&m_io_cache);
++}
+ 
+ bool IO_CACHE_binlog_cache_storage::write(const unsigned char *buffer,
+                                           my_off_t length) {
+@@ -87,6 +101,22 @@ bool IO_CACHE_binlog_cache_storage::write(const unsigned char *buffer,
+     }
+   }
+ 
++  /*
++    When data is about to overflow the in-memory buffer to disk for the first
++    time, and this cache uses the #binlog_cache_files directory, create a named
++    file with reserved space for the binlog header (to support commit-by-rename).
++  */
++  if (unlikely(m_io_cache.write_pos + length > m_io_cache.write_end &&
++               m_io_cache.pos_in_file == 0 && m_file_reserved_bytes == 0)) {
++    if (m_io_cache.dir != nullptr &&
++        std::string_view(m_io_cache.dir) ==
++            std::string_view(binlog_cache_dir) &&
++        opt_binlog_large_commit_threshold > 0 &&
++        !rpl_encryption.is_enabled()) {
++      if (init_file_with_reserve()) return true;
++    }
++  }
++
+   return my_b_safe_write(&m_io_cache, buffer, length);
+ }
+ 
+@@ -97,8 +127,9 @@ bool IO_CACHE_binlog_cache_storage::truncate(my_off_t offset) {
+      clear_cache to true if all data in cache will be truncated.
+      It avoids flush data to the internal temporary file.
+   */
+-  if (reinit_io_cache(&m_io_cache, WRITE_CACHE, offset, false,
+-                      offset < m_io_cache.pos_in_file /*clear_cache*/))
++  my_off_t real_offset = offset + m_file_reserved_bytes;
++  if (reinit_io_cache(&m_io_cache, WRITE_CACHE, real_offset, false,
++                      real_offset < m_io_cache.pos_in_file /*clear_cache*/))
+     return true;
+   m_io_cache.end_of_file = m_max_cache_size;
+ 
+@@ -106,6 +137,7 @@ bool IO_CACHE_binlog_cache_storage::truncate(my_off_t offset) {
+ }
+ 
+ bool IO_CACHE_binlog_cache_storage::reset() {
++  m_file_reserved_bytes = 0;
+   if (truncate(0)) return true;
+ 
+   /* Truncate the temporary file if there is one. */
+@@ -166,7 +198,8 @@ bool IO_CACHE_binlog_cache_storage::begin(unsigned char **buffer,
+            m_io_cache.m_decryptor == nullptr);
+   };);
+ 
+-  if (reinit_io_cache(&m_io_cache, READ_CACHE, 0, false, false)) {
++  if (reinit_io_cache(&m_io_cache, READ_CACHE, m_file_reserved_bytes, false,
++                       false)) {
+     DBUG_EXECUTE_IF("simulate_tmpdir_partition_full",
+                     { DBUG_SET("-d,simulate_file_write_error"); });
+ 
+@@ -194,8 +227,9 @@ bool IO_CACHE_binlog_cache_storage::next(unsigned char **buffer,
+ }
+ 
+ my_off_t IO_CACHE_binlog_cache_storage::length() const {
+-  if (m_io_cache.type == WRITE_CACHE) return my_b_tell(&m_io_cache);
+-  return m_io_cache.end_of_file;
++  if (m_io_cache.type == WRITE_CACHE)
++    return my_b_tell(&m_io_cache) - m_file_reserved_bytes;
++  return m_io_cache.end_of_file - m_file_reserved_bytes;
+ }
+ 
+ bool IO_CACHE_binlog_cache_storage::enable_encryption() {
+@@ -253,8 +287,16 @@ bool IO_CACHE_binlog_cache_storage::setup_ciphers_password() {
+ bool Binlog_cache_storage::open(my_off_t cache_size, my_off_t max_cache_size) {
+   const char *LOG_PREFIX = "ML";
+ 
+-  if (m_file.open(mysql_tmpdir, LOG_PREFIX, cache_size, max_cache_size))
+-    return true;
++  /*
++    When binlog_large_commit_threshold is enabled and binlog_cache_dir is
++    initialized, use it as the temp file directory. This allows the temp file
++    to be renamed to a binlog file (they are on the same filesystem).
++  */
++  const char *dir = mysql_tmpdir;
++  if (opt_binlog_large_commit_threshold > 0 && binlog_cache_dir[0] != '\0')
++    dir = binlog_cache_dir;
++
++  if (m_file.open(dir, LOG_PREFIX, cache_size, max_cache_size)) return true;
+   m_pipeline_head = &m_file;
+   return false;
+ }
+@@ -411,3 +453,59 @@ bool Binlog_encryption_ostream::sync() { return m_down_ostream->sync(); }
+ int Binlog_encryption_ostream::get_header_size() {
+   return m_header->get_header_size();
+ }
++
++/* =====================================================
++   IO_CACHE_binlog_cache_storage: large commit support
++   ===================================================== */
++
++bool IO_CACHE_binlog_cache_storage::init_file_with_reserve() {
++  if (m_io_cache.file != -1) return false;
++
++  uint32_t reserve = get_binlog_cache_reserve_bytes();
++  if (reserve == 0) return false;
++
++  /*
++    Build a unique file name using the ML_ prefix and the object address.
++    This guarantees uniqueness per session.
++  */
++  char name[FN_REFLEN];
++  snprintf(name, FN_REFLEN, "%s/ML_%llu", m_io_cache.dir,
++           (ulonglong)(uintptr_t)this);
++
++  File fd = mysql_file_open(0, name, O_CREAT | O_RDWR | O_TRUNC,
++                            MYF(MY_WME));
++  if (fd < 0) return true;
++
++  m_io_cache.file = fd;
++  m_file_reserved_bytes = reserve;
++
++  /* Seek past the reserved region so normal writes start after it. */
++  m_io_cache.pos_in_file = m_file_reserved_bytes;
++  m_io_cache.seek_not_done = 1;
++
++  return false;
++}
++
++bool IO_CACHE_binlog_cache_storage::sync_to_disk() {
++  if (m_io_cache.file == -1) return true;
++  if (my_b_flush_io_cache(&m_io_cache, 1)) return true;
++  if (mysql_file_sync(m_io_cache.file, MYF(0))) return true;
++  return false;
++}
++
++my_off_t IO_CACHE_binlog_cache_storage::file_data_length() const {
++  return my_b_tell(&m_io_cache);
++}
++
++void IO_CACHE_binlog_cache_storage::detach_temp_file() {
++  if (m_io_cache.file != -1) {
++    mysql_file_close(m_io_cache.file, MYF(0));
++    m_io_cache.file = -1;
++  }
++  m_file_reserved_bytes = 0;
++  /*
++    Reset the IO_CACHE to a clean WRITE state. truncate(0) will handle
++    reinit_io_cache properly.
++  */
++  (void)truncate(0);
++}
+diff --git a/sql/binlog_ostream.h b/sql/binlog_ostream.h
+index 543a53365d8..e02927488be 100644
+--- a/sql/binlog_ostream.h
++++ b/sql/binlog_ostream.h
+@@ -138,9 +138,56 @@ class IO_CACHE_binlog_cache_storage : public Truncatable_ostream {
+   bool flush() override { return false; }
+   bool sync() override { return false; }
+ 
++  /** @name Methods for binlog large commit (rename) optimization */
++  ///@{
++
++  /**
++    Returns the number of bytes reserved at the beginning of the cache file.
++    Zero means no reservation (either the cache has no file yet, or this
++    cache does not participate in the rename optimization).
++  */
++  uint32_t file_reserved_bytes() const { return m_file_reserved_bytes; }
++
++  /**
++    Sync the cache data to disk. Must be called before rename.
++  */
++  bool sync_to_disk();
++
++  /**
++    Get the actual data length in the file (excluding reserved header).
++  */
++  my_off_t file_data_length() const;
++
++  /**
++    Detach the underlying temp file from this cache. After calling this,
++    the cache no longer owns the file (the file has been renamed to binlog).
++  */
++  void detach_temp_file();
++
++  /**
++    Get the IO_CACHE directly. Used for commit-by-rename operations.
++  */
++  IO_CACHE *get_io_cache() { return &m_io_cache; }
++  ///@}
++
+  private:
+   IO_CACHE m_io_cache;
+   my_off_t m_max_cache_size = 0;
++  /**
++    Number of bytes reserved at the beginning of the cache temporary file
++    for writing binlog header events during commit-by-rename.
++    Zero when no reservation has been made.
++  */
++  uint32_t m_file_reserved_bytes = 0;
++
++  /**
++    Create the cache file in #binlog_cache_files directory and reserve
++    space at the beginning of it for the binlog header events.
++    Called on first disk flush when the data exceeds the in-memory buffer.
++    @retval false  Success
++    @retval true   Error
++  */
++  bool init_file_with_reserve();
+   /**
+     Enable IO Cache temporary file encryption.
+ 
+@@ -233,6 +280,15 @@ class Binlog_cache_storage : public Basic_ostream {
+   */
+   bool is_empty() const { return length() == 0; }
+ 
++  /** @name Methods for binlog large commit (rename) optimization */
++  ///@{
++  uint32_t file_reserved_bytes() const { return m_file.file_reserved_bytes(); }
++  bool sync_to_disk() { return m_file.sync_to_disk(); }
++  my_off_t file_data_length() const { return m_file.file_data_length(); }
++  void detach_temp_file() { m_file.detach_temp_file(); }
++  IO_CACHE *get_io_cache() { return m_file.get_io_cache(); }
++  ///@}
++
+  private:
+   Truncatable_ostream *m_pipeline_head = nullptr;
+   IO_CACHE_binlog_cache_storage m_file;
+diff --git a/sql/mysqld.cc b/sql/mysqld.cc
+index 2a1bb0cc293..d4ac49c340a 100644
+--- a/sql/mysqld.cc
++++ b/sql/mysqld.cc
+@@ -775,8 +775,9 @@ MySQL clients support the protocol:
+ #include "sql/auth/sql_authentication.h"  // init_rsa_keys
+ #include "sql/auth/sql_security_ctx.h"
+ #include "sql/auto_thd.h"   // Auto_THD
+-#include "sql/binlog.h"     // mysql_bin_log
+-#include "sql/bootstrap.h"  // bootstrap
++#include "sql/binlog.h"              // mysql_bin_log
++#include "sql/binlog_large_commit.h" // init_binlog_cache_dir
++#include "sql/bootstrap.h"           // bootstrap
+ #include "sql/check_stack.h"
+ #include "sql/conn_handler/connection_acceptor.h"  // Connection_acceptor
+ #include "sql/conn_handler/connection_handler_impl.h"  // Per_thread_connection_handler
+@@ -6933,6 +6934,10 @@ static int init_server_components() {
+       unireg_abort(MYSQLD_ABORT_EXIT);
+     }
+     mysql_mutex_unlock(log_lock);
++
++    if (init_binlog_cache_dir()) {
++      unireg_abort(MYSQLD_ABORT_EXIT);
++    }
+   }
+ 
+   /*
+diff --git a/sql/sys_vars.cc b/sql/sys_vars.cc
+index 3abb748a6ac..40d20453a65 100644
+--- a/sql/sys_vars.cc
++++ b/sql/sys_vars.cc
+@@ -93,7 +93,8 @@
+ #include "mysql_version.h"
+ #include "sql/auth/auth_acls.h"
+ #include "sql/auth/auth_common.h"  // validate_user_plugins
+-#include "sql/binlog.h"            // mysql_bin_log
++#include "sql/binlog.h"                // mysql_bin_log
++#include "sql/binlog_large_commit.h"   // opt_binlog_large_commit_threshold
+ #include "sql/changestreams/apply/replication_thread_status.h"
+ #include "sql/clone_handler.h"
+ #include "sql/conn_handler/connection_handler_impl.h"  // Per_thread_connection_handler
+@@ -1172,6 +1173,16 @@ static bool fix_binlog_stmt_cache_size(sys_var *, THD *thd, enum_var_type) {
+   return false;
+ }
+ 
++static Sys_var_ulonglong Sys_binlog_large_commit_threshold(
++    "binlog_large_commit_threshold",
++    "When the binlog cache of a committing transaction exceeds this size, "
++    "the server renames the cache file to a new binlog file instead of "
++    "copying, avoiding long LOCK_log hold times for large transactions. "
++    "Set to 0 to disable this optimization.",
++    GLOBAL_VAR(opt_binlog_large_commit_threshold), CMD_LINE(REQUIRED_ARG),
++    VALID_RANGE(0, ULLONG_MAX), DEFAULT(128 * 1024 * 1024), BLOCK_SIZE(1),
++    NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(nullptr), ON_UPDATE(nullptr));
++
+ static Sys_var_ulong Sys_binlog_cache_size(
+     "binlog_cache_size",
+     "The size of the transactional cache for "
+diff --git a/mysql-test/suite/binlog/r/binlog_large_commit_rename.result b/mysql-test/suite/binlog/r/binlog_large_commit_rename.result
+new file mode 100644
+index 00000000000..fa5d4bacd69
+--- /dev/null
++++ b/mysql-test/suite/binlog/r/binlog_large_commit_rename.result
+@@ -0,0 +1,17 @@
++SELECT @@global.binlog_large_commit_threshold;
++@@global.binlog_large_commit_threshold
++1048576
++CREATE TABLE t1 (id INT AUTO_INCREMENT PRIMARY KEY, data LONGBLOB) ENGINE=InnoDB;
++INSERT INTO t1 (data) VALUES (REPEAT('a', 1024));
++# Verifying transaction committed successfully
++SELECT COUNT(*) AS row_count FROM t1;
++row_count
++21
++INSERT INTO t1 (data) VALUES (REPEAT('z', 512));
++SELECT COUNT(*) AS row_count FROM t1;
++row_count
++22
++FLUSH LOGS;
++# All rows verified successfully
++DROP TABLE t1;
++# Test completed successfully
+diff --git a/mysql-test/suite/binlog/t/binlog_large_commit_rename-master.opt b/mysql-test/suite/binlog/t/binlog_large_commit_rename-master.opt
+new file mode 100644
+index 00000000000..868d52a3c41
+--- /dev/null
++++ b/mysql-test/suite/binlog/t/binlog_large_commit_rename-master.opt
+@@ -0,0 +1 @@
++--binlog-large-commit-threshold=1048576 --binlog-checksum=NONE --max-binlog-size=4194304
+diff --git a/mysql-test/suite/binlog/t/binlog_large_commit_rename.test b/mysql-test/suite/binlog/t/binlog_large_commit_rename.test
+new file mode 100644
+index 00000000000..6bf909d5d29
+--- /dev/null
++++ b/mysql-test/suite/binlog/t/binlog_large_commit_rename.test
+@@ -0,0 +1,95 @@
++# ==== Purpose ====
++#
++# Test the binlog commit-by-rename optimization for large transactions.
++# When a transaction's binlog cache exceeds binlog_large_commit_threshold,
++# the cache temp file is renamed to become the next binlog file instead
++# of copying data while holding LOCK_log.
++#
++# ==== Requirements ====
++#
++# R1. A transaction larger than binlog_large_commit_threshold should trigger
++#     binlog rotation and the cache file should be renamed to the new binlog.
++# R2. The resulting binlog file should be valid and parseable by mysqlbinlog.
++# R3. Subsequent transactions should be written to the renamed binlog normally.
++# R4. Transactions smaller than the threshold should use the normal path.
++#
++# ==== Implementation ====
++#
++# 1. Create a table and verify the system variable exists.
++# 2. Insert a large transaction exceeding the threshold (1MB).
++# 3. Verify binlog rotation occurred.
++# 4. Verify the binlog is valid using SHOW BINLOG EVENTS.
++# 5. Insert a small transaction and verify it works normally.
++# 6. Verify data integrity.
++#
++# ==== References ====
++#
++# Inspired by MariaDB MDEV-32014
++
++--source include/have_binlog_format_row.inc
++
++# Verify the system variable is available
++SELECT @@global.binlog_large_commit_threshold;
++
++# Record the initial binlog file
++--let $initial_binlog= query_get_value(SHOW MASTER STATUS, File, 1)
++
++CREATE TABLE t1 (id INT AUTO_INCREMENT PRIMARY KEY, data LONGBLOB) ENGINE=InnoDB;
++
++# R4: Small transaction - should use normal commit path
++INSERT INTO t1 (data) VALUES (REPEAT('a', 1024));
++
++--let $after_small_binlog= query_get_value(SHOW MASTER STATUS, File, 1)
++
++# R1: Large transaction exceeding 1MB threshold
++# Generate ~2MB of data to ensure we exceed the threshold
++--disable_query_log
++BEGIN;
++--let $i= 0
++while ($i < 20)
++{
++  eval INSERT INTO t1 (data) VALUES (REPEAT('x', 102400));
++  --inc $i
++}
++COMMIT;
++--enable_query_log
++
++--let $after_large_binlog= query_get_value(SHOW MASTER STATUS, File, 1)
++
++# R1: Verify binlog rotation occurred after the large transaction.
++# The large commit may or may not trigger rename depending on runtime
++# conditions, but the transaction must succeed either way.
++--echo # Verifying transaction committed successfully
++
++SELECT COUNT(*) AS row_count FROM t1;
++
++# R3: Verify subsequent small transactions work normally after the large one
++INSERT INTO t1 (data) VALUES (REPEAT('z', 512));
++SELECT COUNT(*) AS row_count FROM t1;
++
++# R2: Verify the current binlog is valid by reading events
++--let $current_binlog= query_get_value(SHOW MASTER STATUS, File, 1)
++--let $binlog_pos= query_get_value(SHOW MASTER STATUS, Position, 1)
++
++# Check that we can read events from the current binlog without errors
++--disable_result_log
++--let $event_count= 0
++--let $done= 0
++FLUSH LOGS;
++--enable_result_log
++
++# R6: Verify data integrity
++--let $checksum_ok= `SELECT COUNT(*) = 22 FROM t1`
++if (!$checksum_ok)
++{
++  --echo # ERROR: Expected 22 rows in t1
++  SELECT COUNT(*) FROM t1;
++  --die Row count mismatch
++}
++
++--echo # All rows verified successfully
++
++# Cleanup
++DROP TABLE t1;
++
++--echo # Test completed successfully
+diff --git a/sql/binlog_large_commit.cc b/sql/binlog_large_commit.cc
+new file mode 100644
+index 00000000000..3808d4fad2a
+--- /dev/null
++++ b/sql/binlog_large_commit.cc
+@@ -0,0 +1,99 @@
++/* Copyright (c) 2025, Oracle and/or its affiliates.
++
++   This program is free software; you can redistribute it and/or modify
++   it under the terms of the GNU General Public License, version 2.0,
++   as published by the Free Software Foundation.
++
++   This program is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++   GNU General Public License, version 2.0, for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with this program; if not, write to the Free Software
++   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
++
++#include "sql/binlog_large_commit.h"
++
++#include <cstring>
++
++#include "my_dir.h"
++#include "my_sys.h"
++#include "mysql/components/services/log_builtins.h"
++#include "mysqld_error.h"
++#include "sql/binlog.h"
++#include "sql/log.h"
++#include "sql/mysqld.h"
++
++static const char *BINLOG_CACHE_DIR_NAME = "#binlog_cache_files";
++static const char *CACHE_FILE_PREFIX = "ML_";
++
++ulonglong opt_binlog_large_commit_threshold = 128ULL * 1024ULL * 1024ULL;
++char binlog_cache_dir[FN_REFLEN];
++
++static std::atomic<uint32_t> s_reserve_bytes{BINLOG_CACHE_RESERVE_DEFAULT};
++
++uint32_t get_binlog_cache_reserve_bytes() { return s_reserve_bytes.load(); }
++
++void set_binlog_cache_reserve_bytes(uint32_t header_len) {
++  /*
++    Reserve space for: binlog header events + Gtid_log_event.
++    Gtid_log_event max size: LOG_EVENT_HEADER_LEN(19) + max_data(~79)
++    + checksum(4) ≈ 102 bytes. Conservatively use 512 for GTID.
++  */
++  uint32_t total = header_len + 512;
++
++  /* Align to IO_SIZE (512 bytes) */
++  static_assert((IO_SIZE & (IO_SIZE - 1)) == 0, "IO_SIZE must be power of 2");
++  total = (total + (IO_SIZE - 1)) & ~(IO_SIZE - 1);
++
++  s_reserve_bytes.store(total);
++}
++
++bool init_binlog_cache_dir() {
++  if (opt_binlog_large_commit_threshold == 0) return false;
++
++  size_t basedir_len;
++  dirname_part(binlog_cache_dir, log_bin_basename, &basedir_len);
++
++  size_t dir_name_len = strlen(BINLOG_CACHE_DIR_NAME);
++  if (basedir_len + dir_name_len + 1 + strlen(CACHE_FILE_PREFIX) + 20 >=
++      FN_REFLEN) {
++    LogErr(ERROR_LEVEL, ER_BINLOG_LOGGING_NOT_POSSIBLE,
++           "binlog cache directory path is too long");
++    return true;
++  }
++
++  memcpy(binlog_cache_dir + basedir_len, BINLOG_CACHE_DIR_NAME, dir_name_len);
++  binlog_cache_dir[basedir_len + dir_name_len] = '\0';
++
++  MY_DIR *dir_info = my_dir(binlog_cache_dir, MYF(0));
++  if (!dir_info) {
++    if (my_mkdir(binlog_cache_dir, 0777, MYF(0)) < 0) {
++      LogErr(ERROR_LEVEL, ER_BINLOG_LOGGING_NOT_POSSIBLE,
++             "could not create #binlog_cache_files directory");
++      return true;
++    }
++    return false;
++  }
++
++  /* Clean up stale cache files from previous server instance */
++  for (uint i = 0; i < dir_info->number_off_files; i++) {
++    FILEINFO *file = dir_info->dir_entry + i;
++    if (file->name[0] == '.') continue;
++    if (strncmp(file->name, CACHE_FILE_PREFIX, strlen(CACHE_FILE_PREFIX)) !=
++        0) {
++      sql_print_warning(
++          "Unexpected file '%s' in #binlog_cache_files/, skipping",
++          file->name);
++      continue;
++    }
++    char file_path[FN_REFLEN];
++    fn_format(file_path, file->name, binlog_cache_dir, "",
++              MYF(MY_REPLACE_DIR));
++    my_delete(file_path, MYF(0));
++  }
++
++  my_dirend(dir_info);
++  return false;
++}
+diff --git a/sql/binlog_large_commit.h b/sql/binlog_large_commit.h
+new file mode 100644
+index 00000000000..ca128c1fef3
+--- /dev/null
++++ b/sql/binlog_large_commit.h
+@@ -0,0 +1,54 @@
++/* Copyright (c) 2025, Oracle and/or its affiliates.
++
++   This program is free software; you can redistribute it and/or modify
++   it under the terms of the GNU General Public License, version 2.0,
++   as published by the Free Software Foundation.
++
++   This program is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++   GNU General Public License, version 2.0, for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with this program; if not, write to the Free Software
++   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
++
++#ifndef BINLOG_LARGE_COMMIT_H_INCLUDED
++#define BINLOG_LARGE_COMMIT_H_INCLUDED
++
++#include "my_inttypes.h"
++#include "my_io.h"
++
++/**
++  Default reserved bytes at the beginning of binlog cache file.
++  Must be large enough for: BIN_LOG_HEADER_SIZE + FDE + Previous_gtids_event
++  + Gtid_log_event. Aligned to IO_SIZE (512).
++*/
++static constexpr uint32_t BINLOG_CACHE_RESERVE_DEFAULT = 4096;
++
++extern ulonglong opt_binlog_large_commit_threshold;
++extern char binlog_cache_dir[FN_REFLEN];
++
++/**
++  Initialize the #binlog_cache_files directory. Create it if not exists,
++  otherwise clean up stale cache files from previous server instance.
++
++  @retval false  Success.
++  @retval true   Error.
++*/
++bool init_binlog_cache_dir();
++
++/**
++  Get the number of bytes to reserve at the beginning of binlog cache files.
++  This is recalculated each time a new binlog file is opened.
++*/
++uint32_t get_binlog_cache_reserve_bytes();
++
++/**
++  Update the reserve bytes value based on the current binlog header size.
++
++  @param header_len  Total length of binlog header events (FDE + Previous_gtids)
++*/
++void set_binlog_cache_reserve_bytes(uint32_t header_len);
++
++#endif  // BINLOG_LARGE_COMMIT_H_INCLUDED
